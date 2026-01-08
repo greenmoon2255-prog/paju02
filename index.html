@@ -1,1 +1,828 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>운정호수 폭우 AR 미션 (위치 게이트)</title>
+
+  <style>
+    :root{
+      --bg:#0b1020; --panel:rgba(0,0,0,.65); --text:#f5f7ff;
+      --red:#ff3b30; --blue:#2f7dff; --ok:#7CFF9A; --bad:#FF7C7C;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; overflow:hidden; background:var(--bg); color:var(--text);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+
+    .stage{position:fixed; inset:0; display:none; align-items:center; justify-content:center}
+    .stage.active{display:flex}
+
+    .panel{
+      width:min(680px,92vw);
+      padding:18px 16px;
+      border-radius:18px;
+      background:var(--panel);
+      backdrop-filter: blur(10px);
+      border:1px solid rgba(255,255,255,.12);
+    }
+
+    .warning{border:1px solid rgba(255,59,48,.35)}
+    .blink-dot{
+      width:10px;height:10px;border-radius:50%;
+      background:var(--red);
+      box-shadow:0 0 18px rgba(255,59,48,.9);
+      animation:blink 1s infinite;
+      margin-bottom:10px;
+    }
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:.15}}
+    .warning-title{font-weight:950;letter-spacing:.08em;color:var(--red);font-size:18px}
+    .warning-msg{font-size:20px;font-weight:950;margin-top:6px}
+    .sub{opacity:.9;margin:10px 0 14px 0;line-height:1.45}
+
+    .locBox{
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:14px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      line-height:1.5;
+      font-size:14px;
+    }
+    .locLine{display:flex; gap:8px; margin:4px 0}
+    .locK{min-width:86px; opacity:.8}
+    .locV{flex:1}
+    .pill{
+      display:inline-block;
+      font-size:12px;
+      padding:4px 8px;
+      border-radius:999px;
+      background:rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.10);
+      margin-top:8px;
+      opacity:.95;
+    }
+    .pill.ok{border-color:rgba(124,255,154,.5); color:var(--ok)}
+    .pill.bad{border-color:rgba(255,124,124,.55); color:var(--bad)}
+
+    button{
+      width:100%;
+      border:0;
+      border-radius:999px;
+      padding:14px 16px;
+      font-size:16px;
+      font-weight:900;
+      margin-top:10px;
+      cursor:pointer;
+      touch-action:manipulation;
+    }
+    .primary{background:rgba(47,125,255,.95);color:#fff}
+    .ghost{background:rgba(255,255,255,.10);color:#fff}
+    button:disabled{opacity:.45;cursor:not-allowed}
+
+    .footer-hint{
+      position:fixed; bottom:14px; left:0; right:0;
+      text-align:center; font-size:13px; opacity:.75;
+      padding:0 12px;
+    }
+
+    /* 카메라 + 오버레이 */
+    #cam{
+      position:fixed; inset:0;
+      width:100%; height:100%;
+      object-fit:cover;
+      background:#000;
+    }
+    #rain{
+      position:fixed; inset:0;
+      width:100%; height:100%;
+      pointer-events:none;
+    }
+
+    /* 수위 상승 (강하게) */
+    #water{
+      position:fixed; left:0; right:0; bottom:0;
+      height:0%;
+      pointer-events:none;
+
+      background:
+        radial-gradient(1200px 260px at 50% 0%, rgba(255,255,255,.22), rgba(255,255,255,0) 65%),
+        linear-gradient(to top,
+          rgba(10,60,255,.92),
+          rgba(0,155,255,.78) 55%,
+          rgba(0,170,255,.50) 78%,
+          rgba(0,170,255,.22) 92%,
+          rgba(0,170,255,0) 100%
+        );
+      filter: saturate(1.2) contrast(1.1);
+      box-shadow: 0 -18px 50px rgba(0,140,255,.35) inset;
+
+      transition:height 6s linear;
+    }
+    #water::before{
+      content:"";
+      position:absolute; left:-10%; right:-10%; top:-18px;
+      height:28px;
+      background: linear-gradient(to bottom, rgba(255,255,255,.40), rgba(255,255,255,0));
+      opacity:.85;
+      filter: blur(1px);
+      animation: surface 1.2s ease-in-out infinite;
+    }
+    @keyframes surface{0%,100%{transform:translateX(0)}50%{transform:translateX(18px)}}
+
+    /* 물 문구: 나중에 등장 + 크게 + 빨간색 */
+    #waterText{
+      position:absolute;
+      left:16px; right:16px; top:22px;
+      font-size:48px;
+      font-weight:950;
+      color:var(--red);
+      letter-spacing:-0.02em;
+      line-height:1.1;
+      text-shadow: 0 2px 0 rgba(0,0,0,.55), 0 10px 24px rgba(0,0,0,.55);
+      opacity:0;
+      transform: translateY(-10px) scale(0.98);
+      transition: opacity 240ms ease, transform 240ms ease;
+      pointer-events:none;
+    }
+    #waterText.show{opacity:1; transform: translateY(0) scale(1);}
+
+    .hud{
+      position:fixed; top:12px; left:12px;
+      background:rgba(0,0,0,.45);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      padding:10px 12px;
+      backdrop-filter: blur(8px);
+    }
+    .hud-title{font-weight:950}
+    .hud-sub{opacity:.85;margin-top:2px}
+
+    /* 모달 */
+    .modal{
+      position:fixed; inset:0;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.45);
+      backdrop-filter: blur(6px);
+    }
+    .modal.open{display:flex}
+    .modal-card{
+      width:min(720px,92vw);
+      border-radius:18px;
+      padding:16px 16px 14px;
+      background:rgba(15,18,30,.92);
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .modal-title{font-size:18px;font-weight:950;margin:6px 0 10px}
+    .modal-body{opacity:.95;line-height:1.55}
+    .row{display:flex;gap:10px;margin:8px 0}
+    .k{min-width:120px;opacity:.8}
+    .v{flex:1}
+    .shieldBig{font-size:46px; filter:drop-shadow(0 6px 18px rgba(47,125,255,.25));}
+
+    /* 퀴즈 */
+    .q-title{font-weight:950;margin-bottom:10px}
+    .opt{
+      display:flex; gap:10px; align-items:flex-start;
+      padding:10px 12px; border-radius:12px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      margin:8px 0;
+    }
+    .opt input{margin-top:2px}
+    .feedback{margin-top:10px;min-height:22px;font-weight:950}
+    .feedback.ok{color:var(--ok)}
+    .feedback.bad{color:var(--bad)}
+
+    /* 보상/완료 */
+    .reward-card{text-align:center}
+    .rewardShield{font-size:74px;margin:8px 0 6px;animation:pop 650ms ease-out both}
+    @keyframes pop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.18);opacity:1}100%{transform:scale(1);opacity:1}}
+
+    /* 오류 안내 바 */
+    #errorBar{
+      position:fixed; left:10px; right:10px; bottom:10px;
+      display:none;
+      background:rgba(255,59,48,.20);
+      border:1px solid rgba(255,59,48,.45);
+      border-radius:14px;
+      padding:12px 12px;
+      line-height:1.45;
+      backdrop-filter: blur(8px);
+    }
+    #errorBar.show{display:block}
+    #errorTitle{font-weight:950}
+    #errorMsg{opacity:.95;margin-top:4px}
+  </style>
+</head>
+
+<body>
+  <!-- 1단계: 위치 게이트 -->
+  <section id="stage1" class="stage active">
+    <div class="panel warning">
+      <div class="blink-dot"></div>
+      <div class="warning-title">LOCKED</div>
+      <div class="warning-msg">지정 위치에 도착해야 작동합니다</div>
+      <div class="sub">
+        목표 지점: <b>경기 양평군 지평면 지평의병로 91</b><br/>
+        반경 안에 들어오면 <b>&lt;스캐너 시작&gt;</b> 버튼이 활성화됩니다.
+      </div>
+
+      <div class="locBox">
+        <div class="locLine"><div class="locK">상태</div><div id="gateState" class="locV">위치 확인 전</div></div>
+        <div class="locLine"><div class="locK">거리</div><div id="gateDist" class="locV">-</div></div>
+        <div class="locLine"><div class="locK">정확도</div><div id="gateAcc" class="locV">-</div></div>
+        <div id="gatePill" class="pill bad">잠금 상태</div>
+      </div>
+
+      <button id="locBtn" class="ghost" type="button">위치 확인 (GPS 허용)</button>
+      <button id="startBtn" class="primary" type="button" disabled>스캐너 시작 (카메라 허용)</button>
+      <button id="retryBtn" class="ghost" type="button">문제가 있으면 다시 시도</button>
+    </div>
+
+    <div class="footer-hint">
+      위치는 GPS 오차(수 m~수십 m)가 있습니다. 현장 안정성을 위해 반경은 넉넉히 잡는 게 보통 유리합니다.
+    </div>
+  </section>
+
+  <!-- 2단계: 폭우 AR -->
+  <section id="stage2" class="stage">
+    <video id="cam" playsinline muted autoplay></video>
+    <canvas id="rain"></canvas>
+
+    <div id="water">
+      <div id="waterText">수위 상승… 산책로 침수 위험!</div>
+    </div>
+
+    <div class="hud">
+      <div class="hud-title">[시뮬레이션] 시간당 100mm 폭우</div>
+      <div id="timer" class="hud-sub">00:00</div>
+    </div>
+  </section>
+
+  <!-- 3단계: 시스템 진단 -->
+  <div id="diagnosis" class="modal">
+    <div class="modal-card">
+      <div class="shieldBig">🛡️</div>
+      <div class="modal-title">[시스템 진단 결과]</div>
+      <div class="modal-body">
+        <div class="row"><span class="k">상황</span><span class="v">시간당 100mm 기록적 폭우 발생!</span></div>
+        <div class="row"><span class="k">운정호수 상태</span><span class="v">빗물 <b id="retentionText">약 32만 톤</b> 저류 성공! (스펀지 모드 작동 중)</span></div>
+        <div class="row"><span class="k">결과</span><span class="v">주변 침수 방어 완료. <b>안전합니다.</b></span></div>
+      </div>
+      <button id="toQuizBtn" class="primary" type="button">다음 화면으로</button>
+      <button id="closeDiagnosisBtn" class="ghost" type="button">닫기</button>
+    </div>
+  </div>
+
+  <!-- 퀴즈(2문항 순서대로) -->
+  <div id="quiz" class="modal">
+    <div class="modal-card">
+      <div class="modal-title">그린인프라 퀴즈</div>
+      <div id="quizProgress" class="pill">1 / 2</div>
+
+      <form id="quizForm">
+        <div class="modal-body">
+          <div id="qTitle" class="q-title">문제 로딩 중…</div>
+          <div id="options"></div>
+          <div id="quizFeedback" class="feedback"></div>
+        </div>
+
+        <button id="submitBtn" class="primary" type="submit">제출</button>
+        <button id="nextBtn" class="primary" type="button" style="display:none;">다음 문제</button>
+        <button id="closeQuizBtn" class="ghost" type="button">닫기</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 보상 -->
+  <div id="reward" class="modal">
+    <div class="modal-card reward-card">
+      <div class="rewardShield">🛡️</div>
+      <div class="modal-title">방패 획득!</div>
+      <div id="rewardMsg" class="modal-body">
+        2문항 모두 정답입니다. 그린인프라는 빗물을 천천히 모으고 스며들게 합니다.
+      </div>
+      <button id="rewardOkBtn" class="primary" type="button">완료</button>
+    </div>
+  </div>
+
+  <!-- 완료 -->
+  <section id="stageDone" class="stage">
+    <div class="panel">
+      <div style="font-weight:950;font-size:20px;">미션 완료 ✅</div>
+      <div style="opacity:.9;margin-top:8px;line-height:1.55;">
+        방패를 획득했습니다.<br/>이 창(탭)을 닫고 다음 활동으로 이동하세요.
+      </div>
+      <button id="doneBtn" class="primary" type="button">종료 안내</button>
+      <button id="restartBtn" class="ghost" type="button">(교사용) 다시 시작</button>
+    </div>
+    <div class="footer-hint">웹페이지는 보안 정책상 버튼으로 탭을 강제 종료하기 어렵습니다.</div>
+  </section>
+
+  <!-- 오류 바 -->
+  <div id="errorBar" role="status" aria-live="polite">
+    <div id="errorTitle">실행이 막혔습니다</div>
+    <div id="errorMsg"></div>
+  </div>
+
+  <script>
+    /***********************
+     * 위치 게이트 설정
+     ***********************/
+    const TARGET = {
+      name: "지평의병로 91 (지평파출소 인근)",
+      lat: 37.4753,
+      lon: 127.63612
+    };
+    const GATE = {
+      radiusM: 80,                 // ★ 반경(m). GPS 오차 고려해 60~120m 권장
+      minAccM: 80,                 // 정확도(Accuracy)가 이 값보다 나쁘면 “불안정” 표시
+      pollMs: 3000                 // 위치 재확인 주기
+    };
+
+    /***********************
+     * AR/연출 설정
+     ***********************/
+    const CONFIG = {
+      floodSeconds: 6,
+      diagnoseAtSeconds: 9,
+      waterTargetHeight: 68,
+      waterTextShowDelayMs: 2600
+    };
+
+    /***********************
+     * DOM
+     ***********************/
+    const stage1 = document.getElementById("stage1");
+    const stage2 = document.getElementById("stage2");
+    const stageDone = document.getElementById("stageDone");
+
+    const locBtn = document.getElementById("locBtn");
+    const startBtn = document.getElementById("startBtn");
+    const retryBtn = document.getElementById("retryBtn");
+
+    const gateState = document.getElementById("gateState");
+    const gateDist = document.getElementById("gateDist");
+    const gateAcc  = document.getElementById("gateAcc");
+    const gatePill = document.getElementById("gatePill");
+
+    const cam = document.getElementById("cam");
+    const rainCanvas = document.getElementById("rain");
+    const water = document.getElementById("water");
+    const waterText = document.getElementById("waterText");
+    const timerEl = document.getElementById("timer");
+
+    const diagnosis = document.getElementById("diagnosis");
+    const retentionText = document.getElementById("retentionText");
+    const toQuizBtn = document.getElementById("toQuizBtn");
+    const closeDiagnosisBtn = document.getElementById("closeDiagnosisBtn");
+
+    const quiz = document.getElementById("quiz");
+    const quizForm = document.getElementById("quizForm");
+    const quizProgress = document.getElementById("quizProgress");
+    const qTitle = document.getElementById("qTitle");
+    const optionsBox = document.getElementById("options");
+    const quizFeedback = document.getElementById("quizFeedback");
+    const closeQuizBtn = document.getElementById("closeQuizBtn");
+    const submitBtn = document.getElementById("submitBtn");
+    const nextBtn = document.getElementById("nextBtn");
+
+    const reward = document.getElementById("reward");
+    const rewardOkBtn = document.getElementById("rewardOkBtn");
+
+    const doneBtn = document.getElementById("doneBtn");
+    const restartBtn = document.getElementById("restartBtn");
+
+    const errorBar = document.getElementById("errorBar");
+    const errorMsg = document.getElementById("errorMsg");
+
+    /***********************
+     * 유틸
+     ***********************/
+    function showStage(el){
+      stage1.classList.remove("active");
+      stage2.classList.remove("active");
+      stageDone.classList.remove("active");
+      el.classList.add("active");
+    }
+    function showError(text){
+      errorMsg.textContent = text;
+      errorBar.classList.add("show");
+      setTimeout(()=>errorBar.classList.remove("show"), 6500);
+    }
+    function fmtM(m){
+      if (m == null || !isFinite(m)) return "-";
+      if (m < 1000) return `${Math.round(m)} m`;
+      return `${(m/1000).toFixed(2)} km`;
+    }
+    function haversineM(lat1, lon1, lat2, lon2){
+      const R = 6371000;
+      const toRad = d => d * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat/2)**2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    /***********************
+     * 위치 게이트 로직
+     ***********************/
+    let lastFix = null;      // {lat,lon,acc,dist,within}
+    let watchTimer = null;
+
+    function updateGateUI(){
+      if (!lastFix){
+        gateState.textContent = "위치 확인 전";
+        gateDist.textContent = "-";
+        gateAcc.textContent  = "-";
+        gatePill.textContent = "잠금 상태";
+        gatePill.className = "pill bad";
+        startBtn.disabled = true;
+        return;
+      }
+
+      gateDist.textContent = fmtM(lastFix.dist);
+      gateAcc.textContent  = lastFix.acc ? `${Math.round(lastFix.acc)} m` : "-";
+
+      const accBad = lastFix.acc && lastFix.acc > GATE.minAccM;
+
+      if (lastFix.within){
+        gateState.textContent = accBad
+          ? "잠금 해제(가능) · GPS 정확도 낮음"
+          : "잠금 해제(가능)";
+        gatePill.textContent = accBad ? "해제(불안정)" : "해제";
+        gatePill.className = accBad ? "pill bad" : "pill ok";
+        startBtn.disabled = false; // ★ 위치 안에 들어오면 버튼 활성화
+      } else {
+        gateState.textContent = `잠금 상태 · 더 이동하세요 (반경 ${GATE.radiusM}m)`;
+        gatePill.textContent = "잠금 상태";
+        gatePill.className = "pill bad";
+        startBtn.disabled = true;
+      }
+    }
+
+    function handleGeoSuccess(pos){
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = pos.coords.accuracy; // meters
+      const dist = haversineM(lat, lon, TARGET.lat, TARGET.lon);
+      const within = dist <= GATE.radiusM;
+
+      lastFix = {lat, lon, acc, dist, within};
+      updateGateUI();
+    }
+
+    function handleGeoError(err){
+      lastFix = null;
+      updateGateUI();
+      showError(
+        "위치 권한이 필요합니다. 브라우저에서 ‘위치 허용’을 켜고 다시 시도해 주세요.\n" +
+        `오류: ${err?.message || err}`
+      );
+    }
+
+    function requestOneFix(){
+      if (!navigator.geolocation){
+        showError("이 브라우저는 위치 기능을 지원하지 않습니다.");
+        return;
+      }
+      gateState.textContent = "위치 확인 중…";
+      navigator.geolocation.getCurrentPosition(
+        handleGeoSuccess,
+        handleGeoError,
+        { enableHighAccuracy:true, timeout:8000, maximumAge:0 }
+      );
+    }
+
+    function startPolling(){
+      if (watchTimer) clearInterval(watchTimer);
+      watchTimer = setInterval(requestOneFix, GATE.pollMs);
+    }
+
+    locBtn.addEventListener("click", ()=>{
+      requestOneFix();
+      startPolling();
+    });
+
+    retryBtn.addEventListener("click", ()=>{
+      requestOneFix();
+      startPolling();
+    });
+
+    /***********************
+     * 카메라
+     ***********************/
+    async function startCamera(){
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        throw new Error("이 브라우저는 카메라 기능을 지원하지 않습니다.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:"environment"},
+        audio:false
+      });
+      cam.srcObject = stream;
+      await cam.play();
+    }
+    function stopCamera(){
+      try{
+        const s = cam.srcObject;
+        if(s && s.getTracks) s.getTracks().forEach(t=>t.stop());
+        cam.srcObject = null;
+      }catch(e){}
+    }
+
+    /***********************
+     * 타이머
+     ***********************/
+    let timerHandle=null;
+    function startTimer(){
+      const t0=Date.now();
+      timerEl.textContent="00:00";
+      timerHandle=setInterval(()=>{
+        const sec=Math.floor((Date.now()-t0)/1000);
+        const mm=String(Math.floor(sec/60)).padStart(2,"0");
+        const ss=String(sec%60).padStart(2,"0");
+        timerEl.textContent=`${mm}:${ss}`;
+      },250);
+    }
+    function stopTimer(){
+      if(timerHandle) clearInterval(timerHandle);
+      timerHandle=null;
+    }
+
+    /***********************
+     * 물
+     ***********************/
+    function startWaterRise(){
+      waterText.classList.remove("show");
+      water.style.transition = "none";
+      water.style.height = "0%";
+      requestAnimationFrame(()=>{
+        water.style.transition = `height ${CONFIG.floodSeconds}s linear`;
+        water.style.height = `${CONFIG.waterTargetHeight}%`;
+      });
+      setTimeout(()=> waterText.classList.add("show"), CONFIG.waterTextShowDelayMs);
+    }
+    function resetWater(){
+      water.style.transition="none";
+      water.style.height="0%";
+      waterText.classList.remove("show");
+    }
+
+    /***********************
+     * 폭우(강한 캔버스)
+     ***********************/
+    let rainRunning=false;
+    let rafId=null;
+    function startRainStrong(){
+      const ctx = rainCanvas.getContext("2d");
+      function resize(){
+        const dpr = window.devicePixelRatio || 1;
+        rainCanvas.width = Math.floor(innerWidth*dpr);
+        rainCanvas.height = Math.floor(innerHeight*dpr);
+        rainCanvas.style.width = innerWidth+"px";
+        rainCanvas.style.height = innerHeight+"px";
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+      }
+      resize();
+      window.addEventListener("resize", resize);
+
+      const drops=[];
+      const COUNT = 700;
+      for(let i=0;i<COUNT;i++){
+        drops.push({
+          x: Math.random()*innerWidth,
+          y: Math.random()*innerHeight,
+          len: 18 + Math.random()*55,
+          spd: 28 + Math.random()*55,
+          a: 0.55 + Math.random()*0.40,
+          w: 1.6 + Math.random()*1.6
+        });
+      }
+
+      rainRunning=true;
+      const loop=()=>{
+        if(!rainRunning) return;
+        ctx.clearRect(0,0,innerWidth,innerHeight);
+        ctx.fillStyle = "rgba(210,230,255,0.05)";
+        ctx.fillRect(0,0,innerWidth,innerHeight);
+
+        for(const d of drops){
+          ctx.lineWidth = d.w;
+          ctx.strokeStyle = `rgba(245,250,255,${d.a})`;
+          ctx.beginPath();
+          ctx.moveTo(d.x, d.y);
+          ctx.lineTo(d.x + 2.2, d.y + d.len);
+          ctx.stroke();
+
+          d.y += d.spd;
+          d.x += 3.6;
+          if(d.y > innerHeight){ d.y = -d.len; d.x = Math.random()*innerWidth; }
+          if(d.x > innerWidth) d.x = 0;
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+    function stopRain(){
+      rainRunning=false;
+      if(rafId) cancelAnimationFrame(rafId);
+      rafId=null;
+      const ctx=rainCanvas.getContext("2d");
+      ctx.clearRect(0,0,innerWidth,innerHeight);
+    }
+
+    /***********************
+     * 퀴즈(2문항 고정 순서)
+     ***********************/
+    const QUIZZES = [
+      {
+        q: "도시에서 비가 오면 물이 빨리 넘치는 가장 큰 이유는?",
+        options: [
+          "하늘이 더 낮아서",
+          "비가 항상 갑자기 오기 때문에",
+          "도시에는 호수가 없어서",
+          "콘크리트·아스팔트가 많아 물이 스며들 틈이 적어서"
+        ],
+        correctIndex: 3,
+        ok: "정답! 바닥이 물을 흡수하지 못하면 빗물이 한꺼번에 몰려요.",
+        bad: "오답입니다. 핵심은 ‘스며들 틈(침투)’이 부족하다는 점이에요."
+      },
+      {
+        q: "그린인프라에 가장 가까운 것은?",
+        options: [
+          "빗물을 더 빨리 하수관으로 보내는 큰 관",
+          "비가 오면 켜지는 경고 사이렌",
+          "빗물정원처럼 물을 잠깐 모아두고 스며들게 하는 공간",
+          "주차장을 더 단단하게 포장하기"
+        ],
+        correctIndex: 2,
+        ok: "정답! 그린인프라는 ‘저류·침투’로 하수관 부담을 줄여요.",
+        bad: "오답입니다. ‘물 저장 + 스며들게 하기’가 핵심이에요."
+      }
+    ];
+
+    let quizIndex = 0;
+    let answeredCorrect = false;
+
+    function openQuizAt(idx){
+      quizIndex = idx;
+      answeredCorrect = false;
+
+      quizProgress.textContent = `${idx+1} / ${QUIZZES.length}`;
+      quizFeedback.textContent = "";
+      quizFeedback.className = "feedback";
+
+      submitBtn.style.display = "block";
+      nextBtn.style.display = "none";
+
+      const item = QUIZZES[idx];
+      qTitle.textContent = item.q;
+      optionsBox.innerHTML = "";
+
+      item.options.forEach((txt, i)=>{
+        const label = document.createElement("label");
+        label.className = "opt";
+
+        const input = document.createElement("input");
+        input.type = "radio";
+        input.name = "q";
+        input.value = String(i);
+
+        const span = document.createElement("span");
+        span.textContent = `${i+1}) ${txt}`;
+
+        label.appendChild(input);
+        label.appendChild(span);
+        optionsBox.appendChild(label);
+      });
+
+      quiz.classList.add("open");
+    }
+
+    closeDiagnosisBtn.addEventListener("click", ()=> diagnosis.classList.remove("open"));
+    toQuizBtn.addEventListener("click", ()=>{
+      diagnosis.classList.remove("open");
+      openQuizAt(0);
+    });
+
+    closeQuizBtn.addEventListener("click", ()=> quiz.classList.remove("open"));
+
+    quizForm.addEventListener("submit", (e)=>{
+      e.preventDefault();
+      const picked = quizForm.querySelector('input[name="q"]:checked');
+      if(!picked){
+        quizFeedback.textContent = "정답을 하나 선택해 주세요.";
+        quizFeedback.className = "feedback bad";
+        return;
+      }
+
+      const item = QUIZZES[quizIndex];
+      const pickedIndex = Number(picked.value);
+      const ok = pickedIndex === item.correctIndex;
+
+      if(ok){
+        answeredCorrect = true;
+        quizFeedback.textContent = item.ok;
+        quizFeedback.className = "feedback ok";
+
+        if(quizIndex < QUIZZES.length - 1){
+          submitBtn.style.display = "none";
+          nextBtn.style.display = "block";
+        }else{
+          setTimeout(()=>{
+            quiz.classList.remove("open");
+            reward.classList.add("open");
+          }, 500);
+        }
+      }else{
+        answeredCorrect = false;
+        quizFeedback.textContent = item.bad;
+        quizFeedback.className = "feedback bad";
+      }
+    });
+
+    nextBtn.addEventListener("click", ()=>{
+      if(!answeredCorrect) return;
+      openQuizAt(quizIndex + 1);
+    });
+
+    /***********************
+     * 시뮬레이션 시작(위치 게이트 강제)
+     ***********************/
+    async function startSimulation(){
+      // ★ 버튼이 활성화되어도, 시작 직전에 한 번 더 체크(치팅 방지)
+      if(!lastFix || !lastFix.within){
+        updateGateUI();
+        showError(`지정 위치 반경 ${GATE.radiusM}m 안에서만 시작할 수 있습니다.`);
+        return;
+      }
+
+      try{
+        await startCamera();
+      }catch(e){
+        showError("카메라가 열리지 않았습니다. Safari/Chrome에서 열고 카메라 권한을 허용해 주세요.\n오류: " + (e.message || e));
+        return;
+      }
+
+      showStage(stage2);
+      resetWater();
+
+      startRainStrong();
+      startTimer();
+      startWaterRise();
+
+      setTimeout(()=>{
+        retentionText.textContent = "약 32만 톤";
+        diagnosis.classList.add("open");
+      }, CONFIG.diagnoseAtSeconds*1000);
+    }
+
+    startBtn.addEventListener("click", startSimulation);
+
+    /***********************
+     * 보상 → 종료
+     ***********************/
+    rewardOkBtn.addEventListener("click", ()=>{
+      reward.classList.remove("open");
+      diagnosis.classList.remove("open");
+      quiz.classList.remove("open");
+
+      stopRain();
+      stopTimer();
+      stopCamera();
+      resetWater();
+
+      showStage(stageDone);
+    });
+
+    doneBtn.addEventListener("click", ()=>{
+      alert("미션이 종료되었습니다. 이 창(탭)을 닫고 다음 활동으로 이동해 주세요.");
+    });
+
+    restartBtn.addEventListener("click", ()=>{
+      reward.classList.remove("open");
+      diagnosis.classList.remove("open");
+      quiz.classList.remove("open");
+
+      stopRain();
+      stopTimer();
+      stopCamera();
+      resetWater();
+
+      showStage(stage1);
+      // 위치 재확인 계속 돌리기
+      requestOneFix();
+      startPolling();
+    });
+
+    // 시작 시 UI
+    updateGateUI();
+  </script>
+</body>
+</html>
 
