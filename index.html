@@ -98,12 +98,11 @@
       pointer-events:none;
     }
 
-    /* 수위 상승 (강하게) */
+    /* 수위 상승 */
     #water{
       position:fixed; left:0; right:0; bottom:0;
       height:0%;
       pointer-events:none;
-
       background:
         radial-gradient(1200px 260px at 50% 0%, rgba(255,255,255,.22), rgba(255,255,255,0) 65%),
         linear-gradient(to top,
@@ -115,7 +114,6 @@
         );
       filter: saturate(1.2) contrast(1.1);
       box-shadow: 0 -18px 50px rgba(0,140,255,.35) inset;
-
       transition:height 6s linear;
     }
     #water::before{
@@ -129,7 +127,6 @@
     }
     @keyframes surface{0%,100%{transform:translateX(0)}50%{transform:translateX(18px)}}
 
-    /* 물 문구: 나중에 등장 + 크게 + 빨간색 */
     #waterText{
       position:absolute;
       left:16px; right:16px; top:22px;
@@ -189,6 +186,7 @@
       margin:8px 0;
     }
     .opt input{margin-top:2px}
+    .opt.disabled{opacity:.55; pointer-events:none;}
     .feedback{margin-top:10px;min-height:22px;font-weight:950}
     .feedback.ok{color:var(--ok)}
     .feedback.bad{color:var(--bad)}
@@ -208,10 +206,11 @@
       padding:12px 12px;
       line-height:1.45;
       backdrop-filter: blur(8px);
+      z-index:9999;
     }
     #errorBar.show{display:block}
     #errorTitle{font-weight:950}
-    #errorMsg{opacity:.95;margin-top:4px}
+    #errorMsg{opacity:.95;margin-top:4px;white-space:pre-line;}
   </style>
 </head>
 
@@ -234,9 +233,9 @@
         <div id="gatePill" class="pill bad">잠금 상태</div>
       </div>
 
-      <button id="locBtn" class="ghost" type="button">위치 확인 (GPS 허용)</button>
+      <!-- 버튼 2개를 1개로 통합: 위치 확인 + 재시도 동일 기능 -->
+      <button id="locBtn" class="ghost" type="button">위치 확인 / 다시 시도 (GPS 허용)</button>
       <button id="startBtn" class="primary" type="button" disabled>스캐너 시작 (카메라 허용)</button>
-      <button id="retryBtn" class="ghost" type="button">문제가 있으면 다시 시도</button>
     </div>
 
     <div class="footer-hint">
@@ -260,10 +259,10 @@
   </section>
 
   <!-- 3단계: 시스템 진단 -->
-  <div id="diagnosis" class="modal">
+  <div id="diagnosis" class="modal" role="dialog" aria-modal="true" aria-labelledby="diagnosisTitle">
     <div class="modal-card">
       <div class="shieldBig">🛡️</div>
-      <div class="modal-title">[시스템 진단 결과]</div>
+      <div id="diagnosisTitle" class="modal-title">[시스템 진단 결과]</div>
       <div class="modal-body">
         <div class="row"><span class="k">상황</span><span class="v">시간당 100mm 기록적 폭우 발생!</span></div>
         <div class="row"><span class="k">운정호수 상태</span><span class="v">빗물 <b id="retentionText">약 32만 톤</b> 저류 성공! (스펀지 모드 작동 중)</span></div>
@@ -275,27 +274,27 @@
   </div>
 
   <!-- 퀴즈(2문항 순서대로) -->
-  <div id="quiz" class="modal">
+  <div id="quiz" class="modal" role="dialog" aria-modal="true" aria-labelledby="quizHeading">
     <div class="modal-card">
-      <div class="modal-title">그린인프라 퀴즈</div>
+      <div id="quizHeading" class="modal-title">그린인프라 퀴즈</div>
       <div id="quizProgress" class="pill">1 / 2</div>
 
-      <form id="quizForm">
+      <div id="quizFormInner">
         <div class="modal-body">
           <div id="qTitle" class="q-title">문제 로딩 중…</div>
           <div id="options"></div>
           <div id="quizFeedback" class="feedback"></div>
         </div>
 
-        <button id="submitBtn" class="primary" type="submit">제출</button>
+        <button id="submitBtn" class="primary" type="button">제출</button>
         <button id="nextBtn" class="primary" type="button" style="display:none;">다음 문제</button>
         <button id="closeQuizBtn" class="ghost" type="button">닫기</button>
-      </form>
+      </div>
     </div>
   </div>
 
   <!-- 보상 -->
-  <div id="reward" class="modal">
+  <div id="reward" class="modal" role="dialog" aria-modal="true">
     <div class="modal-card reward-card">
       <div class="rewardShield">🛡️</div>
       <div class="modal-title">방패 획득!</div>
@@ -335,9 +334,9 @@
       lon: 127.63612
     };
     const GATE = {
-      radiusM: 80,                 // ★ 반경(m). GPS 오차 고려해 60~120m 권장
-      minAccM: 80,                 // 정확도(Accuracy)가 이 값보다 나쁘면 “불안정” 표시
-      pollMs: 3000                 // 위치 재확인 주기
+      radiusM: 80,       // 반경(m). GPS 오차 고려 60~120m 권장
+      minAccM: 80,       // 정확도가 이 값보다 나쁘면 "불안정" 표시
+      pollMs: 3000       // 위치 재확인 주기
     };
 
     /***********************
@@ -353,95 +352,95 @@
     /***********************
      * DOM
      ***********************/
-    const stage1 = document.getElementById("stage1");
-    const stage2 = document.getElementById("stage2");
-    const stageDone = document.getElementById("stageDone");
+    const stage1        = document.getElementById("stage1");
+    const stage2        = document.getElementById("stage2");
+    const stageDone     = document.getElementById("stageDone");
 
-    const locBtn = document.getElementById("locBtn");
-    const startBtn = document.getElementById("startBtn");
-    const retryBtn = document.getElementById("retryBtn");
+    const locBtn        = document.getElementById("locBtn");
+    const startBtn      = document.getElementById("startBtn");
 
-    const gateState = document.getElementById("gateState");
-    const gateDist = document.getElementById("gateDist");
-    const gateAcc  = document.getElementById("gateAcc");
-    const gatePill = document.getElementById("gatePill");
+    const gateState     = document.getElementById("gateState");
+    const gateDist      = document.getElementById("gateDist");
+    const gateAcc       = document.getElementById("gateAcc");
+    const gatePill      = document.getElementById("gatePill");
 
-    const cam = document.getElementById("cam");
-    const rainCanvas = document.getElementById("rain");
-    const water = document.getElementById("water");
-    const waterText = document.getElementById("waterText");
-    const timerEl = document.getElementById("timer");
+    const cam           = document.getElementById("cam");
+    const rainCanvas    = document.getElementById("rain");
+    const water         = document.getElementById("water");
+    const waterText     = document.getElementById("waterText");
+    const timerEl       = document.getElementById("timer");
 
-    const diagnosis = document.getElementById("diagnosis");
-    const retentionText = document.getElementById("retentionText");
-    const toQuizBtn = document.getElementById("toQuizBtn");
+    const diagnosis         = document.getElementById("diagnosis");
+    const retentionText     = document.getElementById("retentionText");
+    const toQuizBtn         = document.getElementById("toQuizBtn");
     const closeDiagnosisBtn = document.getElementById("closeDiagnosisBtn");
 
-    const quiz = document.getElementById("quiz");
-    const quizForm = document.getElementById("quizForm");
-    const quizProgress = document.getElementById("quizProgress");
-    const qTitle = document.getElementById("qTitle");
-    const optionsBox = document.getElementById("options");
-    const quizFeedback = document.getElementById("quizFeedback");
-    const closeQuizBtn = document.getElementById("closeQuizBtn");
-    const submitBtn = document.getElementById("submitBtn");
-    const nextBtn = document.getElementById("nextBtn");
+    const quiz          = document.getElementById("quiz");
+    const quizProgress  = document.getElementById("quizProgress");
+    const qTitle        = document.getElementById("qTitle");
+    const optionsBox    = document.getElementById("options");
+    const quizFeedback  = document.getElementById("quizFeedback");
+    const closeQuizBtn  = document.getElementById("closeQuizBtn");
+    const submitBtn     = document.getElementById("submitBtn");
+    const nextBtn       = document.getElementById("nextBtn");
 
-    const reward = document.getElementById("reward");
-    const rewardOkBtn = document.getElementById("rewardOkBtn");
+    const reward        = document.getElementById("reward");
+    const rewardOkBtn   = document.getElementById("rewardOkBtn");
 
-    const doneBtn = document.getElementById("doneBtn");
-    const restartBtn = document.getElementById("restartBtn");
+    const doneBtn       = document.getElementById("doneBtn");
+    const restartBtn    = document.getElementById("restartBtn");
 
-    const errorBar = document.getElementById("errorBar");
-    const errorMsg = document.getElementById("errorMsg");
+    const errorBar      = document.getElementById("errorBar");
+    const errorMsgEl    = document.getElementById("errorMsg");
 
     /***********************
      * 유틸
      ***********************/
-    function showStage(el){
-      stage1.classList.remove("active");
-      stage2.classList.remove("active");
-      stageDone.classList.remove("active");
+    function showStage(el) {
+      [stage1, stage2, stageDone].forEach(s => s.classList.remove("active"));
       el.classList.add("active");
     }
-    function showError(text){
-      errorMsg.textContent = text;
+
+    let errorTimer = null;
+    function showError(text) {
+      errorMsgEl.textContent = text;
       errorBar.classList.add("show");
-      setTimeout(()=>errorBar.classList.remove("show"), 6500);
+      if (errorTimer) clearTimeout(errorTimer);
+      errorTimer = setTimeout(() => errorBar.classList.remove("show"), 6500);
     }
-    function fmtM(m){
+
+    function fmtM(m) {
       if (m == null || !isFinite(m)) return "-";
       if (m < 1000) return `${Math.round(m)} m`;
-      return `${(m/1000).toFixed(2)} km`;
+      return `${(m / 1000).toFixed(2)} km`;
     }
-    function haversineM(lat1, lon1, lat2, lon2){
+
+    function haversineM(lat1, lon1, lat2, lon2) {
       const R = 6371000;
       const toRad = d => d * Math.PI / 180;
       const dLat = toRad(lat2 - lat1);
       const dLon = toRad(lon2 - lon1);
       const a =
-        Math.sin(dLat/2)**2 +
+        Math.sin(dLat / 2) ** 2 +
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-        Math.sin(dLon/2)**2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
+        Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     /***********************
      * 위치 게이트 로직
      ***********************/
-    let lastFix = null;      // {lat,lon,acc,dist,within}
+    let lastFix    = null;
     let watchTimer = null;
 
-    function updateGateUI(){
-      if (!lastFix){
+    function updateGateUI() {
+      if (!lastFix) {
         gateState.textContent = "위치 확인 전";
-        gateDist.textContent = "-";
-        gateAcc.textContent  = "-";
-        gatePill.textContent = "잠금 상태";
-        gatePill.className = "pill bad";
-        startBtn.disabled = true;
+        gateDist.textContent  = "-";
+        gateAcc.textContent   = "-";
+        gatePill.textContent  = "잠금 상태";
+        gatePill.className    = "pill bad";
+        startBtn.disabled     = true;
         return;
       }
 
@@ -450,43 +449,41 @@
 
       const accBad = lastFix.acc && lastFix.acc > GATE.minAccM;
 
-      if (lastFix.within){
+      if (lastFix.within) {
         gateState.textContent = accBad
           ? "잠금 해제(가능) · GPS 정확도 낮음"
           : "잠금 해제(가능)";
         gatePill.textContent = accBad ? "해제(불안정)" : "해제";
-        gatePill.className = accBad ? "pill bad" : "pill ok";
-        startBtn.disabled = false; // ★ 위치 안에 들어오면 버튼 활성화
+        gatePill.className   = accBad ? "pill bad" : "pill ok";
+        startBtn.disabled    = false;
       } else {
         gateState.textContent = `잠금 상태 · 더 이동하세요 (반경 ${GATE.radiusM}m)`;
-        gatePill.textContent = "잠금 상태";
-        gatePill.className = "pill bad";
-        startBtn.disabled = true;
+        gatePill.textContent  = "잠금 상태";
+        gatePill.className    = "pill bad";
+        startBtn.disabled     = true;
       }
     }
 
-    function handleGeoSuccess(pos){
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const acc = pos.coords.accuracy; // meters
+    function handleGeoSuccess(pos) {
+      const lat  = pos.coords.latitude;
+      const lon  = pos.coords.longitude;
+      const acc  = pos.coords.accuracy;
       const dist = haversineM(lat, lon, TARGET.lat, TARGET.lon);
-      const within = dist <= GATE.radiusM;
-
-      lastFix = {lat, lon, acc, dist, within};
+      lastFix    = { lat, lon, acc, dist, within: dist <= GATE.radiusM };
       updateGateUI();
     }
 
-    function handleGeoError(err){
+    function handleGeoError(err) {
       lastFix = null;
       updateGateUI();
       showError(
-        "위치 권한이 필요합니다. 브라우저에서 ‘위치 허용’을 켜고 다시 시도해 주세요.\n" +
+        "위치 권한이 필요합니다. 브라우저에서 '위치 허용'을 켜고 다시 시도해 주세요.\n" +
         `오류: ${err?.message || err}`
       );
     }
 
-    function requestOneFix(){
-      if (!navigator.geolocation){
+    function requestOneFix() {
+      if (!navigator.geolocation) {
         showError("이 브라우저는 위치 기능을 지원하지 않습니다.");
         return;
       }
@@ -494,125 +491,150 @@
       navigator.geolocation.getCurrentPosition(
         handleGeoSuccess,
         handleGeoError,
-        { enableHighAccuracy:true, timeout:8000, maximumAge:0 }
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
     }
 
-    function startPolling(){
+    function startPolling() {
       if (watchTimer) clearInterval(watchTimer);
       watchTimer = setInterval(requestOneFix, GATE.pollMs);
     }
 
-    locBtn.addEventListener("click", ()=>{
+    // ★ FIX: 두 버튼(locBtn, retryBtn)을 하나로 통합
+    function handleLocBtnClick() {
       requestOneFix();
       startPolling();
-    });
-
-    retryBtn.addEventListener("click", ()=>{
-      requestOneFix();
-      startPolling();
-    });
+    }
+    locBtn.addEventListener("click", handleLocBtnClick);
 
     /***********************
      * 카메라
      ***********************/
-    async function startCamera(){
-      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("이 브라우저는 카메라 기능을 지원하지 않습니다.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video:{facingMode:"environment"},
-        audio:false
+        video: { facingMode: "environment" },
+        audio: false
       });
       cam.srcObject = stream;
       await cam.play();
     }
-    function stopCamera(){
-      try{
+
+    function stopCamera() {
+      try {
         const s = cam.srcObject;
-        if(s && s.getTracks) s.getTracks().forEach(t=>t.stop());
+        if (s && s.getTracks) s.getTracks().forEach(t => t.stop());
         cam.srcObject = null;
-      }catch(e){}
+      } catch (e) { /* 무시 */ }
     }
 
     /***********************
      * 타이머
      ***********************/
-    let timerHandle=null;
-    function startTimer(){
-      const t0=Date.now();
-      timerEl.textContent="00:00";
-      timerHandle=setInterval(()=>{
-        const sec=Math.floor((Date.now()-t0)/1000);
-        const mm=String(Math.floor(sec/60)).padStart(2,"0");
-        const ss=String(sec%60).padStart(2,"0");
-        timerEl.textContent=`${mm}:${ss}`;
-      },250);
+    let timerHandle = null;
+
+    function startTimer() {
+      stopTimer();
+      const t0 = Date.now();
+      timerEl.textContent = "00:00";
+      timerHandle = setInterval(() => {
+        const sec = Math.floor((Date.now() - t0) / 1000);
+        const mm  = String(Math.floor(sec / 60)).padStart(2, "0");
+        const ss  = String(sec % 60).padStart(2, "0");
+        timerEl.textContent = `${mm}:${ss}`;
+      }, 250);
     }
-    function stopTimer(){
-      if(timerHandle) clearInterval(timerHandle);
-      timerHandle=null;
+
+    function stopTimer() {
+      if (timerHandle) clearInterval(timerHandle);
+      timerHandle = null;
     }
 
     /***********************
      * 물
      ***********************/
-    function startWaterRise(){
+    let waterTextTimer = null;
+
+    function startWaterRise() {
+      if (waterTextTimer) clearTimeout(waterTextTimer);
       waterText.classList.remove("show");
       water.style.transition = "none";
-      water.style.height = "0%";
-      requestAnimationFrame(()=>{
-        water.style.transition = `height ${CONFIG.floodSeconds}s linear`;
-        water.style.height = `${CONFIG.waterTargetHeight}%`;
+      water.style.height     = "0%";
+
+      // ★ FIX: rAF 두 번 중첩으로 transition:none 플러시 보장
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          water.style.transition = `height ${CONFIG.floodSeconds}s linear`;
+          water.style.height     = `${CONFIG.waterTargetHeight}%`;
+        });
       });
-      setTimeout(()=> waterText.classList.add("show"), CONFIG.waterTextShowDelayMs);
+
+      waterTextTimer = setTimeout(
+        () => waterText.classList.add("show"),
+        CONFIG.waterTextShowDelayMs
+      );
     }
-    function resetWater(){
-      water.style.transition="none";
-      water.style.height="0%";
+
+    function resetWater() {
+      if (waterTextTimer) clearTimeout(waterTextTimer);
+      waterTextTimer = null;
+      water.style.transition = "none";
+      water.style.height     = "0%";
       waterText.classList.remove("show");
     }
 
     /***********************
-     * 폭우(강한 캔버스)
+     * 폭우(캔버스)
      ***********************/
-    let rainRunning=false;
-    let rafId=null;
-    function startRainStrong(){
-      const ctx = rainCanvas.getContext("2d");
-      function resize(){
-        const dpr = window.devicePixelRatio || 1;
-        rainCanvas.width = Math.floor(innerWidth*dpr);
-        rainCanvas.height = Math.floor(innerHeight*dpr);
-        rainCanvas.style.width = innerWidth+"px";
-        rainCanvas.style.height = innerHeight+"px";
-        ctx.setTransform(dpr,0,0,dpr,0,0);
-      }
-      resize();
-      window.addEventListener("resize", resize);
+    let rainRunning  = false;
+    let rafId        = null;
+    let rainResizeFn = null;   // ★ FIX: resize 리스너 참조 보존 → 제거 가능하게
 
-      const drops=[];
+    function startRainStrong() {
+      const ctx = rainCanvas.getContext("2d");
+
+      // ★ FIX: 이전 리스너가 있으면 먼저 제거
+      if (rainResizeFn) {
+        window.removeEventListener("resize", rainResizeFn);
+        rainResizeFn = null;
+      }
+
+      function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        rainCanvas.width  = Math.floor(innerWidth  * dpr);
+        rainCanvas.height = Math.floor(innerHeight * dpr);
+        rainCanvas.style.width  = innerWidth  + "px";
+        rainCanvas.style.height = innerHeight + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      rainResizeFn = resize;
+      resize();
+      window.addEventListener("resize", rainResizeFn);
+
+      const drops = [];
       const COUNT = 700;
-      for(let i=0;i<COUNT;i++){
+      for (let i = 0; i < COUNT; i++) {
         drops.push({
-          x: Math.random()*innerWidth,
-          y: Math.random()*innerHeight,
-          len: 18 + Math.random()*55,
-          spd: 28 + Math.random()*55,
-          a: 0.55 + Math.random()*0.40,
-          w: 1.6 + Math.random()*1.6
+          x:   Math.random() * innerWidth,
+          y:   Math.random() * innerHeight,
+          len: 18 + Math.random() * 55,
+          spd: 28 + Math.random() * 55,
+          a:   0.55 + Math.random() * 0.40,
+          w:   1.6  + Math.random() * 1.6
         });
       }
 
-      rainRunning=true;
-      const loop=()=>{
-        if(!rainRunning) return;
-        ctx.clearRect(0,0,innerWidth,innerHeight);
+      rainRunning = true;
+      const loop = () => {
+        if (!rainRunning) return;
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
         ctx.fillStyle = "rgba(210,230,255,0.05)";
-        ctx.fillRect(0,0,innerWidth,innerHeight);
+        ctx.fillRect(0, 0, innerWidth, innerHeight);
 
-        for(const d of drops){
-          ctx.lineWidth = d.w;
+        for (const d of drops) {
+          ctx.lineWidth   = d.w;
           ctx.strokeStyle = `rgba(245,250,255,${d.a})`;
           ctx.beginPath();
           ctx.moveTo(d.x, d.y);
@@ -621,23 +643,49 @@
 
           d.y += d.spd;
           d.x += 3.6;
-          if(d.y > innerHeight){ d.y = -d.len; d.x = Math.random()*innerWidth; }
-          if(d.x > innerWidth) d.x = 0;
+          if (d.y > innerHeight) { d.y = -d.len; d.x = Math.random() * innerWidth; }
+          if (d.x > innerWidth)    d.x = 0;
         }
         rafId = requestAnimationFrame(loop);
       };
       loop();
     }
-    function stopRain(){
-      rainRunning=false;
-      if(rafId) cancelAnimationFrame(rafId);
-      rafId=null;
-      const ctx=rainCanvas.getContext("2d");
-      ctx.clearRect(0,0,innerWidth,innerHeight);
+
+    function stopRain() {
+      rainRunning = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+
+      // ★ FIX: resize 리스너 정리
+      if (rainResizeFn) {
+        window.removeEventListener("resize", rainResizeFn);
+        rainResizeFn = null;
+      }
+
+      const ctx = rainCanvas.getContext("2d");
+      ctx.clearRect(0, 0, rainCanvas.width, rainCanvas.height);
     }
 
     /***********************
-     * 퀴즈(2문항 고정 순서)
+     * 전체 종료/초기화 공통 함수
+     ***********************/
+    function cleanupSimulation() {
+      stopRain();
+      stopTimer();
+      stopCamera();
+      resetWater();
+
+      // ★ FIX: 진단 모달 예약 타이머 반드시 취소
+      if (diagnosisTimer) clearTimeout(diagnosisTimer);
+      diagnosisTimer = null;
+
+      diagnosis.classList.remove("open");
+      quiz.classList.remove("open");
+      reward.classList.remove("open");
+    }
+
+    /***********************
+     * 퀴즈(2문항)
      ***********************/
     const QUIZZES = [
       {
@@ -649,8 +697,8 @@
           "콘크리트·아스팔트가 많아 물이 스며들 틈이 적어서"
         ],
         correctIndex: 3,
-        ok: "정답! 바닥이 물을 흡수하지 못하면 빗물이 한꺼번에 몰려요.",
-        bad: "오답입니다. 핵심은 ‘스며들 틈(침투)’이 부족하다는 점이에요."
+        ok:  "정답! 바닥이 물을 흡수하지 못하면 빗물이 한꺼번에 몰려요.",
+        bad: "오답입니다. 핵심은 '스며들 틈(침투)'이 부족하다는 점이에요."
       },
       {
         q: "그린인프라에 가장 가까운 것은?",
@@ -661,40 +709,39 @@
           "주차장을 더 단단하게 포장하기"
         ],
         correctIndex: 2,
-        ok: "정답! 그린인프라는 ‘저류·침투’로 하수관 부담을 줄여요.",
-        bad: "오답입니다. ‘물 저장 + 스며들게 하기’가 핵심이에요."
+        ok:  "정답! 그린인프라는 '저류·침투'로 하수관 부담을 줄여요.",
+        bad: "오답입니다. '물 저장 + 스며들게 하기'가 핵심이에요."
       }
     ];
 
-    let quizIndex = 0;
+    let quizIndex       = 0;
     let answeredCorrect = false;
 
-    function openQuizAt(idx){
-      quizIndex = idx;
+    function openQuizAt(idx) {
+      quizIndex       = idx;
       answeredCorrect = false;
 
-      quizProgress.textContent = `${idx+1} / ${QUIZZES.length}`;
-      quizFeedback.textContent = "";
-      quizFeedback.className = "feedback";
-
-      submitBtn.style.display = "block";
-      nextBtn.style.display = "none";
+      quizProgress.textContent    = `${idx + 1} / ${QUIZZES.length}`;
+      quizFeedback.textContent    = "";
+      quizFeedback.className      = "feedback";
+      submitBtn.style.display     = "block";
+      nextBtn.style.display       = "none";
 
       const item = QUIZZES[idx];
       qTitle.textContent = item.q;
       optionsBox.innerHTML = "";
 
-      item.options.forEach((txt, i)=>{
+      item.options.forEach((txt, i) => {
         const label = document.createElement("label");
         label.className = "opt";
 
         const input = document.createElement("input");
-        input.type = "radio";
-        input.name = "q";
+        input.type  = "radio";
+        input.name  = "q";
         input.value = String(i);
 
         const span = document.createElement("span");
-        span.textContent = `${i+1}) ${txt}`;
+        span.textContent = `${i + 1}) ${txt}`;
 
         label.appendChild(input);
         label.appendChild(span);
@@ -704,82 +751,118 @@
       quiz.classList.add("open");
     }
 
-    closeDiagnosisBtn.addEventListener("click", ()=> diagnosis.classList.remove("open"));
-    toQuizBtn.addEventListener("click", ()=>{
+    // ★ FIX: 정답 후 선택지 비활성화 함수
+    function lockOptions() {
+      optionsBox.querySelectorAll(".opt").forEach(el => {
+        el.classList.add("disabled");
+        el.querySelector("input").disabled = true;
+      });
+    }
+
+    closeDiagnosisBtn.addEventListener("click", () => diagnosis.classList.remove("open"));
+    toQuizBtn.addEventListener("click", () => {
       diagnosis.classList.remove("open");
       openQuizAt(0);
     });
 
-    closeQuizBtn.addEventListener("click", ()=> quiz.classList.remove("open"));
+    closeQuizBtn.addEventListener("click", () => quiz.classList.remove("open"));
 
-    quizForm.addEventListener("submit", (e)=>{
-      e.preventDefault();
-      const picked = quizForm.querySelector('input[name="q"]:checked');
-      if(!picked){
+    // ★ FIX: <form> 제거 후 버튼 클릭으로 제출
+    submitBtn.addEventListener("click", () => {
+      const picked = optionsBox.querySelector('input[name="q"]:checked');
+      if (!picked) {
         quizFeedback.textContent = "정답을 하나 선택해 주세요.";
-        quizFeedback.className = "feedback bad";
+        quizFeedback.className   = "feedback bad";
         return;
       }
 
-      const item = QUIZZES[quizIndex];
+      const item        = QUIZZES[quizIndex];
       const pickedIndex = Number(picked.value);
-      const ok = pickedIndex === item.correctIndex;
+      const ok          = pickedIndex === item.correctIndex;
 
-      if(ok){
-        answeredCorrect = true;
+      // ★ FIX: 정답/오답 모두 선택지 잠금
+      lockOptions();
+
+      if (ok) {
+        answeredCorrect        = true;
         quizFeedback.textContent = item.ok;
-        quizFeedback.className = "feedback ok";
+        quizFeedback.className   = "feedback ok";
+        submitBtn.style.display  = "none";
 
-        if(quizIndex < QUIZZES.length - 1){
-          submitBtn.style.display = "none";
+        if (quizIndex < QUIZZES.length - 1) {
           nextBtn.style.display = "block";
-        }else{
-          setTimeout(()=>{
+        } else {
+          setTimeout(() => {
             quiz.classList.remove("open");
             reward.classList.add("open");
           }, 500);
         }
-      }else{
-        answeredCorrect = false;
+      } else {
+        answeredCorrect          = false;
         quizFeedback.textContent = item.bad;
-        quizFeedback.className = "feedback bad";
+        quizFeedback.className   = "feedback bad";
+        // 오답: 잠금 해제하여 재도전 허용
+        optionsBox.querySelectorAll(".opt").forEach(el => {
+          el.classList.remove("disabled");
+          el.querySelector("input").disabled = false;
+        });
+        submitBtn.style.display = "block";
       }
     });
 
-    nextBtn.addEventListener("click", ()=>{
-      if(!answeredCorrect) return;
+    nextBtn.addEventListener("click", () => {
+      if (!answeredCorrect) return;
       openQuizAt(quizIndex + 1);
     });
 
     /***********************
-     * 시뮬레이션 시작(위치 게이트 강제)
+     * 시뮬레이션 시작
      ***********************/
-    async function startSimulation(){
-      // ★ 버튼이 활성화되어도, 시작 직전에 한 번 더 체크(치팅 방지)
-      if(!lastFix || !lastFix.within){
+    let diagnosisTimer  = null;   // ★ FIX: 진단 모달 타이머 변수 (전역 보존)
+    let simRunning      = false;  // ★ FIX: 중복 시작 방지 플래그
+
+    async function startSimulation() {
+      // ★ FIX: 중복 클릭 방지
+      if (simRunning) return;
+
+      // ★ FIX: 시작 직전 위치 재검증
+      if (!lastFix || !lastFix.within) {
         updateGateUI();
         showError(`지정 위치 반경 ${GATE.radiusM}m 안에서만 시작할 수 있습니다.`);
         return;
       }
 
-      try{
+      simRunning        = true;
+      startBtn.disabled = true;
+
+      // ★ FIX: 시뮬레이션 진입 시 GPS 폴링 정지
+      if (watchTimer) clearInterval(watchTimer);
+      watchTimer = null;
+
+      try {
         await startCamera();
-      }catch(e){
-        showError("카메라가 열리지 않았습니다. Safari/Chrome에서 열고 카메라 권한을 허용해 주세요.\n오류: " + (e.message || e));
+      } catch (e) {
+        showError(
+          "카메라가 열리지 않았습니다. Safari/Chrome에서 열고 카메라 권한을 허용해 주세요.\n" +
+          "오류: " + (e.message || e)
+        );
+        simRunning        = false;
+        startBtn.disabled = false;
         return;
       }
 
       showStage(stage2);
       resetWater();
-
       startRainStrong();
       startTimer();
       startWaterRise();
 
-      setTimeout(()=>{
+      // ★ FIX: 타이머 변수에 저장 → 재시작 시 clearTimeout 가능
+      diagnosisTimer = setTimeout(() => {
+        diagnosisTimer = null;
         retentionText.textContent = "약 32만 톤";
         diagnosis.classList.add("open");
-      }, CONFIG.diagnoseAtSeconds*1000);
+      }, CONFIG.diagnoseAtSeconds * 1000);
     }
 
     startBtn.addEventListener("click", startSimulation);
@@ -787,42 +870,29 @@
     /***********************
      * 보상 → 종료
      ***********************/
-    rewardOkBtn.addEventListener("click", ()=>{
-      reward.classList.remove("open");
-      diagnosis.classList.remove("open");
-      quiz.classList.remove("open");
-
-      stopRain();
-      stopTimer();
-      stopCamera();
-      resetWater();
-
+    rewardOkBtn.addEventListener("click", () => {
+      cleanupSimulation();
+      simRunning = false;
       showStage(stageDone);
     });
 
-    doneBtn.addEventListener("click", ()=>{
+    doneBtn.addEventListener("click", () => {
       alert("미션이 종료되었습니다. 이 창(탭)을 닫고 다음 활동으로 이동해 주세요.");
     });
 
-    restartBtn.addEventListener("click", ()=>{
-      reward.classList.remove("open");
-      diagnosis.classList.remove("open");
-      quiz.classList.remove("open");
-
-      stopRain();
-      stopTimer();
-      stopCamera();
-      resetWater();
+    restartBtn.addEventListener("click", () => {
+      cleanupSimulation();
+      simRunning        = false;
+      startBtn.disabled = true;
 
       showStage(stage1);
-      // 위치 재확인 계속 돌리기
+      // 위치 재확인 재개
       requestOneFix();
       startPolling();
     });
 
-    // 시작 시 UI
+    // 초기 UI
     updateGateUI();
   </script>
 </body>
 </html>
-
